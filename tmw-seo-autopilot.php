@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: TMW SEO Autopilot
- * Description: Auto-fills RankMath SEO + inserts intro/bio/FAQ for Model CPT. Admin, Bulk, CLI. Template-first; optional AI provider.
- * Version: 0.8.0
+ * Description: Auto-fills RankMath SEO & content for Model/Video. Video-first flow → creates/updates Model. Optional OpenAI/Serper.
+ * Version: 1.0.0
  * Author: The Milisofia Ltd
  * License: GPLv2 or later
  */
@@ -16,16 +16,18 @@ require_once TMW_SEO_PATH . 'includes/class-tmw-seo.php';
 require_once TMW_SEO_PATH . 'includes/class-tmw-seo-admin.php';
 require_once TMW_SEO_PATH . 'includes/class-tmw-seo-cli.php';
 require_once TMW_SEO_PATH . 'includes/class-tmw-seo-rankmath.php';
+require_once TMW_SEO_PATH . 'includes/class-tmw-seo-automations.php';
+require_once TMW_SEO_PATH . 'includes/class-tmw-seo-media.php';
 require_once TMW_SEO_PATH . 'includes/providers/class-provider-template.php';
 require_once TMW_SEO_PATH . 'includes/providers/class-provider-openai.php';
 
 add_action('plugins_loaded', function () {
-    if (is_admin()) {
-        \TMW_SEO\Admin::boot();
-    }
+    \TMW_SEO\Admin::boot();
     \TMW_SEO\RankMath::boot();
+    \TMW_SEO\Automations::boot();
+    \TMW_SEO\Media::boot();
 });
 
 register_activation_hook(__FILE__, function () {
-    error_log(TMW_SEO_TAG . ' activated v0.8.0');
+    error_log(TMW_SEO_TAG . ' activated v1.0.0');
 });
