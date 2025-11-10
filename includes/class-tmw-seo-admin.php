@@ -16,12 +16,12 @@ class Admin {
 
     public static function assets($hook) {
         if (strpos($hook, 'tmw-seo-autopilot') !== false) {
-            wp_enqueue_style('tmw-seo-admin', TMW_SEO_URL . 'assets/admin.css', [], '0.8.0');
+            wp_enqueue_style('tmw-seo-admin', TMW_SEO_URL . 'assets/admin.css', [], '1.0.0');
         }
     }
 
     public static function meta_box() {
-        add_meta_box('tmw-seo-box', 'TMW SEO Autopilot', [__CLASS__, 'render_box'], 'model', 'side', 'high');
+        add_meta_box('tmw-seo-box', 'TMW SEO Autopilot', [__CLASS__, 'render_box'], Core::MODEL_PT, 'side', 'high');
     }
 
     public static function render_box($post) {
@@ -106,7 +106,7 @@ class Admin {
         if (!empty($_POST['tmw_seo_run'])) {
             check_admin_referer('tmw_seo_tools');
             $limit = max(1, (int)$_POST['limit']);
-            $q = new \WP_Query(['post_type' => Core::POST_TYPE, 'posts_per_page' => $limit, 'post_status' => 'publish']);
+            $q = new \WP_Query(['post_type' => Core::MODEL_PT, 'posts_per_page' => $limit, 'post_status' => 'publish']);
             $done = 0;
             while ($q->have_posts()) { $q->the_post();
                 $r = Core::generate_and_write(get_the_ID(), ['strategy' => 'template', 'insert_content' => true]);
@@ -125,6 +125,13 @@ class Admin {
                 <hr>
                 <p>Optional OpenAI provider: define <code>OPENAI_API_KEY</code> in wp-config.php or set constant <code>TMW_SEO_OPENAI</code> with your key to enable.</p>
             </form>
+            <?php
+            echo '<hr><h2>Integration Settings (read-only)</h2><table class="widefat"><tbody>';
+            echo '<tr><th>Brand order</th><td>' . esc_html(implode(' → ', \TMW_SEO\Core::brand_order())) . '</td></tr>';
+            echo '<tr><th>SUBAFF pattern</th><td>' . esc_html(\TMW_SEO\Core::subaff_pattern()) . '</td></tr>';
+            echo '<tr><th>Default OG image</th><td>' . (\TMW_SEO\Core::default_og() ? '<code>' . esc_url(\TMW_SEO\Core::default_og()) . '</code>' : '<em>none</em>') . '</td></tr>';
+            echo '</tbody></table>';
+            ?>
         </div>
         <?php
     }
