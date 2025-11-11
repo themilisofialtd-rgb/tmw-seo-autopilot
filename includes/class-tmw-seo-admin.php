@@ -12,6 +12,8 @@ class Admin {
         add_filter('bulk_actions-edit-model', [__CLASS__, 'bulk_action']);
         add_filter('handle_bulk_actions-edit-model', [__CLASS__, 'handle_bulk'], 10, 3);
         add_action('admin_menu', [__CLASS__, 'tools_page']);
+        add_action('add_meta_boxes', [__CLASS__, 'add_video_metabox']);
+        add_action('save_post_video', [__CLASS__, 'save_video_metabox'], 10, 2);
     }
 
     public static function assets($hook) {
@@ -134,5 +136,38 @@ class Admin {
             ?>
         </div>
         <?php
+    }
+
+    public static function add_video_metabox() {
+        add_meta_box(
+            'tmwseo_video_box',
+            __('TMW SEO Autopilot', 'tmwseo'),
+            [__CLASS__, 'render_video_box'],
+            \TMW_SEO\Core::VIDEO_PT,
+            'side',
+            'high'
+        );
+    }
+
+    public static function render_video_box($post) {
+        wp_nonce_field('tmwseo_video_box', 'tmwseo_video_box_nonce');
+        $val = get_post_meta($post->ID, 'tmwseo_model_name', true);
+        echo '<p><label for="tmwseo_model_name"><strong>'.esc_html__('Model Name (override)','tmwseo').'</strong></label></p>';
+        echo '<input type="text" id="tmwseo_model_name" name="tmwseo_model_name" value="'.esc_attr($val).'" class="widefat" placeholder="e.g., Abby Murray" />';
+        echo '<p class="description">'.esc_html__('Only needed if detection from the title/taxonomies is wrong.','tmwseo').'</p>';
+    }
+
+    public static function save_video_metabox($post_id, $post) {
+        if (!isset($_POST['tmwseo_video_box_nonce']) || !wp_verify_nonce($_POST['tmwseo_video_box_nonce'], 'tmwseo_video_box')) return;
+        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
+        if ($post->post_type !== \TMW_SEO\Core::VIDEO_PT) return;
+        if (!current_user_can('edit_post', $post_id)) return;
+
+        $val = isset($_POST['tmwseo_model_name']) ? sanitize_text_field(wp_unslash($_POST['tmwseo_model_name'])) : '';
+        if ($val !== '') {
+            update_post_meta($post_id, 'tmwseo_model_name', $val);
+        } else {
+            delete_post_meta($post_id, 'tmwseo_model_name');
+        }
     }
 }
