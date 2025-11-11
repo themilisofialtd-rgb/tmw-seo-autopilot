@@ -13,7 +13,9 @@ class Admin {
         add_filter('handle_bulk_actions-edit-model', [__CLASS__, 'handle_bulk'], 10, 3);
         add_action('admin_menu', [__CLASS__, 'tools_page']);
         add_action('add_meta_boxes', [__CLASS__, 'add_video_metabox']);
-        add_action('save_post_video', [__CLASS__, 'save_video_metabox'], 10, 2);
+        add_action('save_post', [__CLASS__, 'save_video_metabox'], 10, 2);
+        add_action('admin_post_tmwseo_generate_now', [__CLASS__, 'handle_generate_now']);
+        add_action('admin_notices', [__CLASS__, 'admin_notice']);
     }
 
     public static function assets($hook) {
@@ -139,35 +141,46 @@ class Admin {
     }
 
     public static function add_video_metabox() {
-        add_meta_box(
-            'tmwseo_video_box',
-            __('TMW SEO Autopilot', 'tmwseo'),
-            [__CLASS__, 'render_video_box'],
-            \TMW_SEO\Core::VIDEO_PT,
-            'side',
-            'high'
-        );
+        foreach (\TMW_SEO\Core::video_post_types() as $pt) {
+            add_meta_box('tmwseo_box', 'TMW SEO Autopilot', [__CLASS__, 'render_video_box'], $pt, 'side', 'high');
+        }
     }
 
     public static function render_video_box($post) {
-        wp_nonce_field('tmwseo_video_box', 'tmwseo_video_box_nonce');
-        $val = get_post_meta($post->ID, 'tmwseo_model_name', true);
-        echo '<p><label for="tmwseo_model_name"><strong>'.esc_html__('Model Name (override)','tmwseo').'</strong></label></p>';
-        echo '<input type="text" id="tmwseo_model_name" name="tmwseo_model_name" value="'.esc_attr($val).'" class="widefat" placeholder="e.g., Abby Murray" />';
-        echo '<p class="description">'.esc_html__('Only needed if detection from the title/taxonomies is wrong.','tmwseo').'</p>';
+        wp_nonce_field('tmwseo_box', 'tmwseo_box_nonce');
+        $override = get_post_meta($post->ID, 'tmwseo_model_name', true);
+        $last = get_post_meta($post->ID, '_tmwseo_last_message', true);
+        echo '<p><label><strong>Model Name (override)</strong></label>';
+        echo '<input type="text" class="widefat" name="tmwseo_model_name" value="'.esc_attr($override).'" placeholder="e.g., Abby Murray"></p>';
+        $url = wp_nonce_url(admin_url('admin-post.php?action=tmwseo_generate_now&post_id='.$post->ID), 'tmwseo_generate_now_'.$post->ID);
+        echo '<p><a href="'.esc_url($url).'" class="button button-primary" style="width:100%;">Generate Now</a></p>';
+        if ($last) echo '<p><em>Last run:</em> '.esc_html($last).'</p>';
     }
 
     public static function save_video_metabox($post_id, $post) {
-        if (!isset($_POST['tmwseo_video_box_nonce']) || !wp_verify_nonce($_POST['tmwseo_video_box_nonce'], 'tmwseo_video_box')) return;
-        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
-        if ($post->post_type !== \TMW_SEO\Core::VIDEO_PT) return;
+        if (!isset($_POST['tmwseo_box_nonce']) || !wp_verify_nonce($_POST['tmwseo_box_nonce'], 'tmwseo_box')) return;
         if (!current_user_can('edit_post', $post_id)) return;
-
         $val = isset($_POST['tmwseo_model_name']) ? sanitize_text_field(wp_unslash($_POST['tmwseo_model_name'])) : '';
-        if ($val !== '') {
-            update_post_meta($post_id, 'tmwseo_model_name', $val);
-        } else {
-            delete_post_meta($post_id, 'tmwseo_model_name');
-        }
+        if ($val !== '') update_post_meta($post_id, 'tmwseo_model_name', $val); else delete_post_meta($post_id, 'tmwseo_model_name');
+    }
+
+    public static function handle_generate_now() {
+        $post_id = (int)($_GET['post_id'] ?? 0);
+        if (!$post_id || !current_user_can('edit_post', $post_id)) wp_die('No permission');
+        check_admin_referer('tmwseo_generate_now_'.$post_id);
+        $res = \TMW_SEO\Core::generate_for_video($post_id, ['strategy'=>'template']);
+        update_post_meta($post_id, '_tmwseo_last_message', $res['ok'] ? 'Generated via Manual Run' : 'Failed: '.$res['message']);
+        wp_safe_redirect(get_edit_post_link($post_id, '')); exit;
+    }
+
+    public static function admin_notice() {
+        $screen = get_current_screen();
+        if (!$screen || !in_array($screen->post_type ?? '', \TMW_SEO\Core::video_post_types(), true)) return;
+        if ($screen->base !== 'post') return;
+        $post_id = get_the_ID();
+        if (!$post_id) return;
+        $msg = get_post_meta($post_id, '_tmwseo_last_message', true);
+        if (!$msg) return;
+        echo '<div class="notice notice-info is-dismissible"><p><strong>TMW SEO:</strong> '.esc_html($msg).'</p></div>';
     }
 }

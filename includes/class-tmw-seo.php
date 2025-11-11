@@ -24,7 +24,9 @@ class Core {
     public static function generate_for_video(int $video_id, array $args = []): array {
         $args = wp_parse_args($args, ['strategy' => 'template', 'dry_run' => false, 'insert_content' => true]);
         $post = get_post($video_id);
-        if (!$post || $post->post_type !== self::VIDEO_PT) return ['ok' => false, 'message' => 'Not a video'];
+        if (!$post || !in_array($post->post_type, self::video_post_types(), true)) {
+            return ['ok' => false, 'message' => 'Not a video'];
+        }
 
         $name = self::detect_model_name_from_video($post);
         if (!$name) {
@@ -106,26 +108,28 @@ class Core {
         return (int) $id;
     }
 
+    public static function video_post_types(): array {
+        $defaults = ['video', 'videos'];
+        $list = apply_filters('tmw_seo_video_post_types', $defaults);
+        return array_values(array_unique(array_filter($list)));
+    }
+
     /** Detect model name from meta/tax/title */
     public static function detect_model_name_from_video(\WP_Post $post): string {
         // 0) explicit overrides / common meta keys
-        $candidates = [
-            get_post_meta($post->ID, 'tmwseo_model_name', true),
-            get_post_meta($post->ID, 'awe_model_name', true),
-            get_post_meta($post->ID, 'model_name', true),
-            get_post_meta($post->ID, 'performer_name', true),
-        ];
-        foreach ($candidates as $cand) {
-            $cand = trim((string) $cand);
-            if ($cand !== '') return $cand;
+        foreach ([
+            'tmwseo_model_name', 'awe_model_name', 'model_name', 'performer_name'
+        ] as $key) {
+            $val = trim((string) get_post_meta($post->ID, $key, true));
+            if ($val !== '') return $val;
         }
 
-        // 1) taxonomies: try several common ones
-        foreach (['models','model','video_actors','actor','performer'] as $tax) {
+        // 1) taxonomy terms
+        foreach (['models', 'model', 'video_actors', 'actor', 'performer'] as $tax) {
             if (taxonomy_exists($tax)) {
-                $names = wp_get_post_terms($post->ID, $tax, ['fields'=>'names']);
+                $names = wp_get_post_terms($post->ID, $tax, ['fields' => 'names']);
                 if (!is_wp_error($names) && !empty($names)) {
-                    $name = trim((string)$names[0]);
+                    $name = trim((string) $names[0]);
                     if ($name !== '') return $name;
                 }
             }
@@ -134,28 +138,27 @@ class Core {
         // 2) parse from title
         $t = wp_strip_all_tags($post->post_title);
 
-        // 2a) capture "with {Name ...}" (up to 4 tokens, Unicode letters allowed)
+        // 2a) “with {Name} …”
         if (preg_match('/\bwith\s+([A-Z][\p{L}\']+(?:\s+[A-Z][\p{L}\']+){0,3})\b/u', $t, $m)) {
             return trim($m[1]);
         }
 
-        // 2b) split on common separators: em dash, en dash, hyphen, colon, pipe
+        // 2b) split on em dash, en dash, hyphen, colon, pipe
         $parts = preg_split('/\s*[—–\-:\|]\s*/u', $t, 2);
         if (!empty($parts[0])) {
             $first = trim($parts[0]);
-            // strip common prefixes like "Intimate Chat with "
-            $first = preg_replace('/^\s*(?:intimate|private|live)?\s*chat\s+with\s+/i', '', $first);
-            $first = preg_replace('/^\s*(?:video|clip|session)\s+with\s+/i', '', $first);
+            // strip “(… ) chat/video with ”
+            $first = preg_replace('/^\s*(?:intimate|private|live)?\s*(?:chat|video|clip|session)?\s*with\s+/i', '', $first);
             $first = trim($first);
             if ($first !== '') return $first;
         }
 
-        // 3) last resort: single Capitalised First + Last in whole title
+        // 3) last resort: Capitalised First + Last found anywhere
         if (preg_match('/\b([A-Z][\p{L}\']+\s+[A-Z][\p{L}\']+)\b/u', $t, $m2)) {
             return trim($m2[1]);
         }
 
-        error_log(self::TAG." no model name detected for video#{$post->ID} title='{$t}'");
+        error_log(self::TAG . " abort: no model name for video#{$post->ID} title='{$t}'");
         return '';
     }
 
@@ -356,7 +359,7 @@ class Core {
     public static function rollback(int $post_id): array {
         $post = get_post($post_id);
         if (!$post) return ['ok' => false, 'message' => 'Post not found'];
-        $type = strtoupper($post->post_type === self::VIDEO_PT ? 'VIDEO' : 'MODEL');
+        $type = strtoupper(in_array($post->post_type, self::video_post_types(), true) ? 'VIDEO' : 'MODEL');
         $prev = get_post_meta($post_id, "_tmwseo_prev_{$type}", true);
         if (!$prev) return ['ok' => false, 'message' => 'No previous values stored'];
 

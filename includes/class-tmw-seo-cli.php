@@ -15,10 +15,11 @@ if (defined('WP_CLI') && WP_CLI) {
             $strategy = isset($assoc['strategy']) ? sanitize_text_field($assoc['strategy']) : 'template';
             $q = new \WP_Query(['post_type' => $pt, 'posts_per_page' => $limit, 'post_status' => 'publish']);
             $done = 0;
+            $video_types = Core::video_post_types();
             while ($q->have_posts()) {
                 $q->the_post();
                 $id = get_the_ID();
-                if ($pt === Core::VIDEO_PT) {
+                if (in_array($pt, $video_types, true)) {
                     $r = Core::generate_for_video($id, ['dry_run' => $dry, 'strategy' => $strategy]);
                 } else {
                     $r = Core::generate_for_model($id, ['dry_run' => $dry, 'strategy' => $strategy, 'insert_content' => true]);
