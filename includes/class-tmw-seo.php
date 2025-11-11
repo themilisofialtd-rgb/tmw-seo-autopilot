@@ -27,7 +27,10 @@ class Core {
         if (!$post || $post->post_type !== self::VIDEO_PT) return ['ok' => false, 'message' => 'Not a video'];
 
         $name = self::detect_model_name_from_video($post);
-        if (!$name) return ['ok' => false, 'message' => 'No model name detected'];
+        if (!$name) {
+            error_log(self::TAG . " abort: video#{$post->ID} '{$post->post_title}' has no detectable model name");
+            return ['ok' => false, 'message' => 'No model name detected'];
+        }
 
         $model_id = self::ensure_model_exists($name);
         // Build contexts
@@ -105,25 +108,55 @@ class Core {
 
     /** Detect model name from meta/tax/title */
     public static function detect_model_name_from_video(\WP_Post $post): string {
-        $name = '';
-        $name = trim((string) get_post_meta($post->ID, 'awe_model_name', true));
-        if (!$name) {
-            foreach (['models', 'model'] as $tax) {
-                if (taxonomy_exists($tax)) {
-                    $names = wp_get_post_terms($post->ID, $tax, ['fields' => 'names']);
-                    if (!is_wp_error($names) && !empty($names)) {
-                        $name = (string) $names[0];
-                        break;
-                    }
+        // 0) explicit overrides / common meta keys
+        $candidates = [
+            get_post_meta($post->ID, 'tmwseo_model_name', true),
+            get_post_meta($post->ID, 'awe_model_name', true),
+            get_post_meta($post->ID, 'model_name', true),
+            get_post_meta($post->ID, 'performer_name', true),
+        ];
+        foreach ($candidates as $cand) {
+            $cand = trim((string) $cand);
+            if ($cand !== '') return $cand;
+        }
+
+        // 1) taxonomies: try several common ones
+        foreach (['models','model','video_actors','actor','performer'] as $tax) {
+            if (taxonomy_exists($tax)) {
+                $names = wp_get_post_terms($post->ID, $tax, ['fields'=>'names']);
+                if (!is_wp_error($names) && !empty($names)) {
+                    $name = trim((string)$names[0]);
+                    if ($name !== '') return $name;
                 }
             }
         }
-        if (!$name) {
-            $t = wp_strip_all_tags($post->post_title);
-            $parts = preg_split('/\s+—\s+|-+/', $t);
-            if (!empty($parts[0])) $name = trim($parts[0]);
+
+        // 2) parse from title
+        $t = wp_strip_all_tags($post->post_title);
+
+        // 2a) capture "with {Name ...}" (up to 4 tokens, Unicode letters allowed)
+        if (preg_match('/\bwith\s+([A-Z][\p{L}\']+(?:\s+[A-Z][\p{L}\']+){0,3})\b/u', $t, $m)) {
+            return trim($m[1]);
         }
-        return $name;
+
+        // 2b) split on common separators: em dash, en dash, hyphen, colon, pipe
+        $parts = preg_split('/\s*[—–\-:\|]\s*/u', $t, 2);
+        if (!empty($parts[0])) {
+            $first = trim($parts[0]);
+            // strip common prefixes like "Intimate Chat with "
+            $first = preg_replace('/^\s*(?:intimate|private|live)?\s*chat\s+with\s+/i', '', $first);
+            $first = preg_replace('/^\s*(?:video|clip|session)\s+with\s+/i', '', $first);
+            $first = trim($first);
+            if ($first !== '') return $first;
+        }
+
+        // 3) last resort: single Capitalised First + Last in whole title
+        if (preg_match('/\b([A-Z][\p{L}\']+\s+[A-Z][\p{L}\']+)\b/u', $t, $m2)) {
+            return trim($m2[1]);
+        }
+
+        error_log(self::TAG." no model name detected for video#{$post->ID} title='{$t}'");
+        return '';
     }
 
     /** Build CTA (LiveJasmin first, with fallbacks) */
