@@ -29,7 +29,7 @@ class Automations {
 
     protected static function run(int $post_ID, string $source) {
         if (get_transient('_tmwseo_running_'.$post_ID)) return; // debounce
-        set_transient('_tmwseo_running_'.$post_ID, 1, 15);
+        set_transient('_tmwseo_running_'.$post_ID, time(), 15);
 
         $res = Core::generate_for_video($post_ID, ['strategy'=>'template']);
         error_log(self::TAG." {$source} video#{$post_ID} => ".json_encode($res));
@@ -38,6 +38,6 @@ class Automations {
             update_post_meta($post_ID, '_tmwseo_last_message', $msg);
         }
 
-        delete_transient('_tmwseo_running_'.$post_ID);
+        // keep the transient for the full debounce window so subsequent hooks short-circuit
     }
 }
