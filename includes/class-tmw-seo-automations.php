@@ -4,27 +4,39 @@ if (!defined('ABSPATH')) exit;
 
 class Automations {
     const TAG = '[TMW-SEO-AUTO]';
-    protected static $processing = [];
 
     public static function boot() {
         add_action('save_post', [__CLASS__, 'on_save'], 20, 3);
+        add_action('transition_post_status', [__CLASS__, 'on_transition'], 20, 3);
+    }
+
+    protected static function is_video(\WP_Post $post): bool {
+        return in_array($post->post_type, Core::video_post_types(), true);
     }
 
     public static function on_save(int $post_ID, \WP_Post $post, bool $update) {
-        if ($post->post_type !== Core::VIDEO_PT) return;
+        if (!self::is_video($post)) return;
         if ($post->post_status !== 'publish') return;
-        if (isset(self::$processing[$post_ID])) return;
-        if (did_action('tmw_seo_generated_for_' . $post_ID)) return;
+        if (wp_is_post_autosave($post_ID) || wp_is_post_revision($post_ID)) return;
+        self::run($post_ID, 'save_post');
+    }
 
-        self::$processing[$post_ID] = true;
-        try {
-            do_action('tmw_seo_pre_generate', $post_ID);
-            $res = Core::generate_for_video($post_ID, ['strategy' => 'template']);
-            do_action('tmw_seo_post_generate', $post_ID, $res);
-            error_log(self::TAG . " save_post video#$post_ID => " . wp_json_encode(['ok' => $res['ok'] ?? false]));
-            do_action('tmw_seo_generated_for_' . $post_ID);
-        } finally {
-            unset(self::$processing[$post_ID]);
+    public static function on_transition($new, $old, \WP_Post $post) {
+        if (!self::is_video($post)) return;
+        if ($new !== 'publish') return;
+        self::run($post->ID, 'transition');
+    }
+
+    protected static function run(int $post_ID, string $source) {
+        if (get_transient('_tmwseo_running_' . $post_ID)) return;
+        set_transient('_tmwseo_running_' . $post_ID, 1, 15);
+
+        $res = Core::generate_for_video($post_ID, ['strategy' => 'template']);
+        error_log(self::TAG . " {$source} video#{$post_ID} => " . json_encode($res));
+        if (is_admin()) {
+            $msg = $res['ok'] ? 'Generated SEO & content' : 'Skipped: ' . ($res['message'] ?? 'Error');
+            update_post_meta($post_ID, '_tmwseo_last_message', $msg);
         }
+        delete_transient('_tmwseo_running_' . $post_ID);
     }
 }

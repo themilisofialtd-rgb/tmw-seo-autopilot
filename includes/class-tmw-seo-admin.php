@@ -13,7 +13,10 @@ class Admin {
         add_filter('handle_bulk_actions-edit-model', [__CLASS__, 'handle_bulk'], 10, 3);
         add_action('admin_menu', [__CLASS__, 'tools_page']);
         add_action('add_meta_boxes', [__CLASS__, 'add_video_metabox']);
-        add_action('save_post_video', [__CLASS__, 'save_video_metabox'], 10, 2);
+        add_action('save_post', [__CLASS__, 'save_video_metabox'], 10, 2);
+        add_action('admin_post_tmwseo_generate_now', [__CLASS__, 'handle_generate_now']);
+        add_action('admin_post_tmwseo_save_settings', [__CLASS__, 'handle_save_settings']);
+        add_action('admin_notices', [__CLASS__, 'admin_notice']);
     }
 
     public static function assets($hook) {
@@ -119,6 +122,7 @@ class Admin {
         ?>
         <div class="wrap">
             <h1>TMW SEO Autopilot</h1>
+            <?php if (isset($_GET['saved'])) { echo '<div class="updated"><p>Video post types saved.</p></div>'; } ?>
             <form method="post">
                 <?php wp_nonce_field('tmw_seo_tools'); ?>
                 <p>Run a quick backfill using Template provider.</p>
@@ -133,41 +137,86 @@ class Admin {
             echo '<tr><th>SUBAFF pattern</th><td>' . esc_html(\TMW_SEO\Core::subaff_pattern()) . '</td></tr>';
             echo '<tr><th>Default OG image</th><td>' . (\TMW_SEO\Core::default_og() ? '<code>' . esc_url(\TMW_SEO\Core::default_og()) . '</code>' : '<em>none</em>') . '</td></tr>';
             echo '</tbody></table>';
+            $pts = \TMW_SEO\Core::video_post_types();
+            $all = get_post_types(['public' => true], 'objects');
+            echo '<hr><h2>Video Post Types</h2>';
+            echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+            wp_nonce_field('tmwseo_save_settings', 'tmwseo_settings_nonce');
+            echo '<input type="hidden" name="action" value="tmwseo_save_settings" />';
+            echo '<table class="widefat"><thead><tr><th>Use</th><th>Slug</th><th>Label</th></tr></thead><tbody>';
+            foreach ($all as $slug => $obj) {
+                $label = $obj->labels->name . ' (' . $obj->labels->singular_name . ')';
+                $checked = in_array($slug, $pts, true) ? 'checked' : '';
+                echo '<tr><td><input type="checkbox" name="tmwseo_video_pts[]" value="' . esc_attr($slug) . '" ' . $checked . '></td><td><code>' . esc_html($slug) . '</code></td><td>' . esc_html($label) . '</td></tr>';
+            }
+            echo '</tbody></table><p><button class="button button-primary">Save Video Post Types</button></p></form>';
             ?>
         </div>
         <?php
     }
 
     public static function add_video_metabox() {
-        add_meta_box(
-            'tmwseo_video_box',
-            __('TMW SEO Autopilot', 'tmwseo'),
-            [__CLASS__, 'render_video_box'],
-            \TMW_SEO\Core::VIDEO_PT,
-            'side',
-            'high'
-        );
+        foreach (\TMW_SEO\Core::video_post_types() as $pt) {
+            add_meta_box('tmwseo_box', 'TMW SEO Autopilot', [__CLASS__, 'render_video_box'], $pt, 'side', 'high');
+        }
     }
 
     public static function render_video_box($post) {
-        wp_nonce_field('tmwseo_video_box', 'tmwseo_video_box_nonce');
-        $val = get_post_meta($post->ID, 'tmwseo_model_name', true);
-        echo '<p><label for="tmwseo_model_name"><strong>'.esc_html__('Model Name (override)','tmwseo').'</strong></label></p>';
-        echo '<input type="text" id="tmwseo_model_name" name="tmwseo_model_name" value="'.esc_attr($val).'" class="widefat" placeholder="e.g., Abby Murray" />';
-        echo '<p class="description">'.esc_html__('Only needed if detection from the title/taxonomies is wrong.','tmwseo').'</p>';
+        wp_nonce_field('tmwseo_box', 'tmwseo_box_nonce');
+        $override = get_post_meta($post->ID, 'tmwseo_model_name', true);
+        $last = get_post_meta($post->ID, '_tmwseo_last_message', true);
+        echo '<p><label><strong>Model Name (override)</strong></label>';
+        echo '<input type="text" class="widefat" name="tmwseo_model_name" value="' . esc_attr($override) . '" placeholder="e.g., Abby Murray"></p>';
+        $url = wp_nonce_url(admin_url('admin-post.php?action=tmwseo_generate_now&post_id=' . $post->ID), 'tmwseo_generate_now_' . $post->ID);
+        echo '<p><a href="' . esc_url($url) . '" class="button button-primary" style="width:100%;">Generate Now</a></p>';
+        if ($last) echo '<p><em>Last run:</em> ' . esc_html($last) . '</p>';
     }
 
     public static function save_video_metabox($post_id, $post) {
-        if (!isset($_POST['tmwseo_video_box_nonce']) || !wp_verify_nonce($_POST['tmwseo_video_box_nonce'], 'tmwseo_video_box')) return;
-        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
-        if ($post->post_type !== \TMW_SEO\Core::VIDEO_PT) return;
+        if (!isset($_POST['tmwseo_box_nonce']) || !wp_verify_nonce($_POST['tmwseo_box_nonce'], 'tmwseo_box')) return;
+        if (!$post || !in_array($post->post_type, \TMW_SEO\Core::video_post_types(), true)) return;
         if (!current_user_can('edit_post', $post_id)) return;
-
         $val = isset($_POST['tmwseo_model_name']) ? sanitize_text_field(wp_unslash($_POST['tmwseo_model_name'])) : '';
-        if ($val !== '') {
-            update_post_meta($post_id, 'tmwseo_model_name', $val);
-        } else {
-            delete_post_meta($post_id, 'tmwseo_model_name');
+        if ($val !== '') update_post_meta($post_id, 'tmwseo_model_name', $val); else delete_post_meta($post_id, 'tmwseo_model_name');
+    }
+
+    public static function admin_notice() {
+        $screen = get_current_screen();
+        if (!$screen || $screen->base !== 'post') return;
+        if (!in_array($screen->post_type ?? '', \TMW_SEO\Core::video_post_types(), true)) return;
+        $post_id = get_the_ID();
+        if (!$post_id) return;
+        $msg = get_post_meta($post_id, '_tmwseo_last_message', true);
+        if (!$msg) return;
+        echo '<div class="notice notice-info is-dismissible"><p><strong>TMW SEO:</strong> ' . esc_html($msg) . '</p></div>';
+    }
+
+    public static function handle_generate_now() {
+        $post_id = isset($_GET['post_id']) ? (int) $_GET['post_id'] : 0;
+        if (!$post_id) wp_die('Missing post');
+        $post = get_post($post_id);
+        if (!$post || !in_array($post->post_type, \TMW_SEO\Core::video_post_types(), true)) wp_die('Not a video');
+        if (!current_user_can('edit_post', $post_id)) wp_die('No permission');
+        if (!isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'tmwseo_generate_now_' . $post_id)) wp_die('Bad nonce');
+        $res = \TMW_SEO\Core::generate_for_video($post_id, ['strategy' => 'template']);
+        $msg = $res['ok'] ? 'Generated SEO & content' : ('Skipped: ' . ($res['message'] ?? 'Error'));
+        update_post_meta($post_id, '_tmwseo_last_message', $msg);
+        error_log(self::TAG . " manual video#{$post_id} => " . wp_json_encode($res));
+        $redirect = get_edit_post_link($post_id, 'raw');
+        if (!$redirect) {
+            $redirect = admin_url('post.php?post=' . $post_id . '&action=edit');
         }
+        wp_safe_redirect($redirect);
+        exit;
+    }
+
+    public static function handle_save_settings() {
+        if (!current_user_can('manage_options')) wp_die('No permission');
+        if (!isset($_POST['tmwseo_settings_nonce']) || !wp_verify_nonce($_POST['tmwseo_settings_nonce'], 'tmwseo_save_settings')) wp_die('Bad nonce');
+        $pts = isset($_POST['tmwseo_video_pts']) ? (array) $_POST['tmwseo_video_pts'] : [];
+        $pts = array_values(array_unique(array_map('sanitize_key', $pts)));
+        update_option('tmwseo_video_pts', $pts, false);
+        wp_safe_redirect(admin_url('tools.php?page=tmw-seo-autopilot&saved=1'));
+        exit;
     }
 }

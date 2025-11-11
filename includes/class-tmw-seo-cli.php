@@ -18,7 +18,7 @@ if (defined('WP_CLI') && WP_CLI) {
             while ($q->have_posts()) {
                 $q->the_post();
                 $id = get_the_ID();
-                if ($pt === Core::VIDEO_PT) {
+                if (in_array($pt, Core::video_post_types(), true)) {
                     $r = Core::generate_for_video($id, ['dry_run' => $dry, 'strategy' => $strategy]);
                 } else {
                     $r = Core::generate_for_model($id, ['dry_run' => $dry, 'strategy' => $strategy, 'insert_content' => true]);
